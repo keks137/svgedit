@@ -68,7 +68,6 @@
 			white-space: pre;
 			overflow: auto;
 			z-index: 2;
-			tab-size: 2;
 		}
 
 		#code::selection {
@@ -312,6 +311,18 @@
 
 		window.addEventListener("beforeunload", () => {
 			localStorage.setItem("svg-editor-content", code.value);
+		});
+		code.addEventListener("keydown", (e) => {
+			if (e.key === "Tab") {
+				e.preventDefault();
+
+				const start = code.selectionStart;
+				const end = code.selectionEnd;
+
+				code.setRangeText("\t", start, end, "end");
+
+				update();
+			}
 		});
 
 		update();
