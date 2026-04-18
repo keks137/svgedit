@@ -119,6 +119,15 @@
 			white-space: pre-wrap;
 			max-width: 100%;
 		}
+		.error-overlay {
+			position: absolute;
+			justify-content: center;
+			/* top: 20px; */
+			/* left: 20px; */
+			max-width: 90%;
+			max-height: 90%;
+			z-index: 10;
+		}
 		.error-box strong {
 			display: block;
 			margin-bottom: 8px;
@@ -273,6 +282,7 @@
 			const doc = parser.parseFromString(code.value, "image/svg+xml");
 			const hasError = doc.getElementsByTagName("parsererror").length > 0;
 
+			preview.innerHTML = code.value;
 			if (hasError) {
 				const err = doc.getElementsByTagName("parsererror")[0];
 				const rawMsg = err.textContent || "Unknown XML error";
@@ -288,12 +298,16 @@
 
 				const cleanMsg = rawMsg.replace(/\n+/g, " ").trim();
 
-				preview.innerHTML = `<div class="error-box" onclick="jumpTo(${line}, ${col})">
+				const errorOverlay = document.createElement("div");
+				errorOverlay.className = "error-overlay";
+				errorOverlay.innerHTML = `<div class="error-box" onclick="jumpTo(${line}, ${col})">
     <strong>SVG Parse Error</strong>${escapeHtml(cleanMsg)}
     <div style="margin-top:8px;font-size:0.75em;opacity:0.8;">Click to jump to line ${line}, col ${col}</div>
   </div>`;
-			} else {
-				preview.innerHTML = code.value;
+				errorOverlay.onclick = () => jumpTo(line, col);
+
+				preview.style.position = "relative";
+				preview.appendChild(errorOverlay);
 			}
 
 			updateCursorDisplay();
