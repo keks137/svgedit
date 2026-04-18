@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<style>
+		html {
+			font-size: 20px;
+		}
+		body {
+			margin: 0;
+			display: flex;
+			height: 100vh;
+			font-family: monospace;
+		}
+
+		.editor-wrap {
+			width: 50%;
+			position: relative;
+			background: #232323;
+			overflow: hidden; /* keep overlay inside */
+		}
+
+		/* Syntax highlight layer */
+		#highlight {
+			position: absolute;
+			top: 0;
+			left: 0;
+			right: 0;
+			bottom: 0;
+			padding: 10px;
+			font-family: monospace;
+			font-size: 20px;
+			line-height: 1.4;
+			white-space: pre;
+			overflow: auto;
+			pointer-events: none;
+			color: #fff;
+		}
+
+		#highlight .tag {
+			color: #ff79c6;
+		}
+		#highlight .attr {
+			color: #50fa7b;
+		}
+		#highlight .string {
+			color: #f1fa8c;
+		}
+		#highlight .comment {
+			color: #6272a4;
+		}
+
+		/* Input layer */
+		#code {
+			position: absolute;
+			top: 0;
+			left: 0;
+			right: 0;
+			bottom: 0;
+			padding: 10px;
+			font-family: monospace;
+			font-size: 20px;
+			line-height: 1.4;
+			border: none;
+			resize: none;
+			background: transparent;
+			color: transparent;
+			caret-color: #fff;
+			white-space: pre;
+			overflow: auto;
+			z-index: 2;
+			tab-size: 2;
+		}
+
+		#code::selection {
+			background: rgba(255, 255, 255, 0.2);
+		}
+
+		/* Cursor position overlay */
+		#cursor-pos {
+			position: absolute;
+			bottom: 0px;
+			left: 00px;
+			font-family: monospace;
+			font-size: 12px;
+			color: #bbb;
+			background: rgba(0, 0, 0, 0.65);
+			padding: 3px 10px;
+			/* border-radius: 4px; */
+			pointer-events: none;
+			user-select: none;
+			z-index: 3;
+		}
+
+		#preview {
+			width: 50%;
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			background: #f0f0f0;
+			padding: 20px;
+			overflow: auto;
+		}
+
+		#preview svg {
+			max-width: 100%;
+			max-height: 100%;
+			width: auto;
+			height: auto;
+		}
+
+		.error-box {
+			color: #d32f2f;
+			background: #ffebee;
+			border: 1px solid #ef9a9a;
+			padding: 16px;
+			cursor: pointer;
+			border-radius: 6px;
+			font-family: monospace;
+			font-size: 0.85rem;
+			white-space: pre-wrap;
+			max-width: 100%;
+		}
+		.error-box strong {
+			display: block;
+			margin-bottom: 8px;
+			font-size: 1rem;
+		}
+		</style>
+	</head>
+	<body>
+		<div class="editor-wrap">
+			<div id="highlight"></div>
+			<textarea id="code" spellcheck="false"></textarea>
+			<div id="cursor-pos">1:1</div>
+		</div>
+		<div id="preview"></div>
+
+		<script>
+		const code = document.getElementById("code");
+		const highlight = document.getElementById("highlight");
+		const preview = document.getElementById("preview");
+		const cursorPosEl = document.getElementById("cursor-pos");
+
+		const defaultSvg = `<svg width="100" height="100" viewBox="0 0 100 100">
+  <!-- A red circle -->
+  <circle cx="50" cy="50" r="40" fill="red"/>
+</svg>`;
+
+		code.value = localStorage.getItem("svg-editor-content") || defaultSvg;
+
+		function getCursorPos() {
+			const pos = code.selectionStart;
+			const text = code.value;
+			const lines = text.substring(0, pos).split("\n");
+			const line = lines.length;
+			const lastNewline = text.lastIndexOf("\n", pos - 1);
+			const col = pos - lastNewline; // 1-indexed
+			return { line, col };
+		}
+
+		function updateCursorDisplay() {
+			const { line, col } = getCursorPos();
+			cursorPosEl.textContent = `${line}:${col}`;
+		}
+
+		function escapeHtml(text) {
+			return text
+				.replace(/&/g, "&amp;")
+				.replace(/</g, "&lt;")
+				.replace(/>/g, "&gt;");
+		}
+
+		function highlightSvg(src) {
+			let html = "";
+			let i = 0;
+
+			while (i < src.length) {
+				if (src.slice(i, i + 4) === "<!--") {
+					let end = src.indexOf("-->", i);
+					if (end === -1) end = src.length;
+					html += `<span class="comment">${escapeHtml(src.slice(i, end + 3))}</span>`;
+					i = end + 3;
+					continue;
+				}
+
+				if (src[i] === "<") {
+					let end = src.indexOf(">", i);
+					if (end === -1) end = src.length;
+					html += highlightTag(src.slice(i, end + 1));
+					i = end + 1;
+					continue;
+				}
+
+				html += escapeHtml(src[i]);
+				i++;
+			}
+			return html;
+		}
+
+		function highlightTag(tag) {
+			let result = "";
+			let i = 0;
+
+			result += escapeHtml(tag[i++]); // <
+
+			if (tag[i] === "/") {
+				result += escapeHtml(tag[i++]);
+			}
+
+			let nameEnd = i;
+			while (nameEnd < tag.length && !/[\s>]/.test(tag[nameEnd])) nameEnd++;
+			result += `<span class="tag">${escapeHtml(tag.slice(i, nameEnd))}</span>`;
+			i = nameEnd;
+
+			while (i < tag.length && tag[i] !== ">") {
+				while (i < tag.length && /\s/.test(tag[i])) {
+					result += escapeHtml(tag[i++]);
+				}
+				if (tag[i] === ">" || i >= tag.length) break;
+
+				let attrEnd = i;
+				while (
+					attrEnd < tag.length &&
+					tag[attrEnd] !== "=" &&
+					!/\s/.test(tag[attrEnd]) &&
+					tag[attrEnd] !== ">"
+				)
+					attrEnd++;
+				result += `<span class="attr">${escapeHtml(tag.slice(i, attrEnd))}</span>`;
+				i = attrEnd;
+
+				if (tag[i] === "=") {
+					result += escapeHtml(tag[i++]);
+					if (tag[i] === '"' || tag[i] === "'") {
+						let quote = tag[i];
+						let valEnd = i + 1;
+						while (valEnd < tag.length && tag[valEnd] !== quote) valEnd++;
+						valEnd = Math.min(valEnd + 1, tag.length);
+						result += `<span class="string">${escapeHtml(tag.slice(i, valEnd))}</span>`;
+						i = valEnd;
+					}
+				}
+			}
+
+			result += escapeHtml(tag.slice(i));
+			return result;
+		}
+		function jumpTo(line, col) {
+			const text = code.value;
+			const lines = text.split("\n");
+
+			let pos = 0;
+			for (let i = 0; i < line - 1 && i < lines.length; i++) {
+				pos += lines[i].length + 1;
+			}
+			pos += Math.min(col - 1, lines[line - 1]?.length || 0);
+			pos = Math.min(pos, text.length);
+
+			code.focus();
+			code.setSelectionRange(pos, pos);
+
+			const lineHeight = 28;
+			code.scrollTop = Math.max(0, (line - 3) * lineHeight);
+
+			updateCursorDisplay();
+		}
+
+		function update() {
+			highlight.innerHTML = highlightSvg(code.value);
+			highlight.scrollTop = code.scrollTop;
+			highlight.scrollLeft = code.scrollLeft;
+
+			const parser = new DOMParser();
+			const doc = parser.parseFromString(code.value, "image/svg+xml");
+			const hasError = doc.getElementsByTagName("parsererror").length > 0;
+
+			if (hasError) {
+				const err = doc.getElementsByTagName("parsererror")[0];
+				const rawMsg = err.textContent || "Unknown XML error";
+
+				let line = 1,
+					col = 1;
+
+				const lineMatch = rawMsg.match(/(?:line|Line Number)\s*(\d+)/i);
+				const colMatch = rawMsg.match(/(?:column|Column)\s*(\d+):?/i);
+
+				if (lineMatch) line = parseInt(lineMatch[1]);
+				if (colMatch) col = parseInt(colMatch[1]);
+
+				const cleanMsg = rawMsg.replace(/\n+/g, " ").trim();
+
+				preview.innerHTML = `<div class="error-box" onclick="jumpTo(${line}, ${col})">
+    <strong>SVG Parse Error</strong>${escapeHtml(cleanMsg)}
+    <div style="margin-top:8px;font-size:0.75em;opacity:0.8;">Click to jump to line ${line}, col ${col}</div>
+  </div>`;
+			} else {
+				preview.innerHTML = code.value;
+			}
+
+			updateCursorDisplay();
+		}
+
+		code.addEventListener("scroll", () => {
+			highlight.scrollTop = code.scrollTop;
+			highlight.scrollLeft = code.scrollLeft;
+		});
+
+		code.addEventListener("input", update);
+		code.addEventListener("click", updateCursorDisplay);
+		code.addEventListener("keyup", updateCursorDisplay);
+		document.addEventListener("selectionchange", updateCursorDisplay);
+
+		window.addEventListener("beforeunload", () => {
+			localStorage.setItem("svg-editor-content", code.value);
+		});
+
+		update();
+		</script>
+	</body>
+</html>
